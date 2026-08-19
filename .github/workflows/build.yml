@@ -41,7 +41,11 @@ jobs:
     - name: Resign App
       run: codesign --force --deep -s "$CODE_SIGN_IDENTITY" "$BUILD_DIR/$APP_NAME"
     - name: Make DMG
-      run: hdiutil create -srcdir "$BUILD_DIR" -volname "$DMG_NAME" "$DMG_FILE_NAME"
+      run: |
+        mkdir -p "$BUILD_DIR/dmg"
+        ditto "$BUILD_DIR/$APP_NAME" "$BUILD_DIR/dmg/$APP_NAME"
+        ln -s /Applications "$BUILD_DIR/dmg/Applications"
+        hdiutil create -srcdir "$BUILD_DIR/dmg" -volname "$DMG_NAME" "$DMG_FILE_NAME"
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
