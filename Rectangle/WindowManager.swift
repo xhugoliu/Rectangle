@@ -7,6 +7,7 @@ class WindowManager {
     private let screenDetection = ScreenDetection()
     private let standardWindowMoverChain: [WindowMover]
     private let fixedSizeWindowMoverChain: [WindowMover]
+    private let windowFrameAnimator = WindowFrameAnimator()
     
     init() {
         standardWindowMoverChain = [
@@ -19,6 +20,10 @@ class WindowManager {
             FixedSizeWindowMover(),
             BestEffortWindowMover()
         ]
+    }
+
+    func finishActiveAnimation() {
+        windowFrameAnimator.finishActiveAnimation()
     }
     
     func recordAction(windowId: CGWindowID?,
@@ -44,6 +49,11 @@ class WindowManager {
     }
     
     func execute(_ parameters: ExecutionParameters) {
+        // Complete the prior action before reading frame/history state. This
+        // keeps repeated shortcut calculations deterministic while still
+        // allowing the common case to animate asynchronously.
+        finishActiveAnimation()
+
         guard let frontmostWindowElement = parameters.windowElement ?? AccessibilityElement.getFrontWindowElement()
         else {
             NSSound.beep()
@@ -63,6 +73,14 @@ class WindowManager {
                 return
             }
             if let restoreRect = AppDelegate.windowHistory.restoreRects[windowId] {
+                if shouldAnimateRestore(windowElement: frontmostWindowElement,
+                                        source: parameters.source,
+                                        targetFrame: restoreRect) {
+                    animateRestore(windowElement: frontmostWindowElement,
+                                   windowId: windowId,
+                                   targetFrame: restoreRect)
+                    return
+                }
                 frontmostWindowElement.setFrame(restoreRect)
             }
             AppDelegate.windowHistory.lastRectangleActions.removeValue(forKey: windowId)
@@ -190,6 +208,18 @@ class WindowManager {
                                                 visibleFrameOfScreen: visibleFrameOfDestinationScreen,
                                                 source: parameters.source,
                                                 isFixedSize: isFixedSize)
+
+        let isMovedAcrossDisplays = usableScreens.currentScreen != calcResult.screen
+        if shouldAnimate(result: resultParameters,
+                         cooperativeCornerPlan: cooperativeCornerPlan,
+                         isMovedAcrossDisplays: isMovedAcrossDisplays) {
+            animate(result: resultParameters,
+                    from: currentWindowRect,
+                    oldNormalizedFrame: currentNormalizedRect,
+                    ignoreTodo: ignoreTodo,
+                    lastRectangleAction: lastRectangleAction)
+            return
+        }
         
         var resultingRect: CGRect
         if let cooperativeCornerPlan {
@@ -207,7 +237,6 @@ class WindowManager {
                                                                         gapSize: cooperativeCornerPlan.gapSize)
         }
         
-        let isMovedAcrossDisplays = usableScreens.currentScreen != calcResult.screen
         if isMovedAcrossDisplays {
             if calcResult.rect.height != resultingRect.height {
                 Logger.log("Window size wasn't applied perfectly across displays. Trying again.")
@@ -239,6 +268,110 @@ class WindowManager {
         }
         
         postProcess(result: resultParameters, resultingRect: resultingRect)
+    }
+
+    private func shouldAnimateRestore(windowElement: AccessibilityElement,
+                                      source: ExecutionSource,
+                                      targetFrame: CGRect) -> Bool {
+        let currentFrame = windowElement.frame
+        guard windowElement.isResizable(),
+              !currentFrame.isNull,
+              !targetFrame.isNull,
+              !currentFrame.equalTo(targetFrame),
+              canAnimate(windowElement: windowElement, source: source)
+        else { return false }
+
+        let screens = NSScreen.screens
+        return screenDetection.screenContaining(currentFrame, screens: screens)
+            == screenDetection.screenContaining(targetFrame, screens: screens)
+    }
+
+    private func animateRestore(windowElement: AccessibilityElement,
+                                windowId: CGWindowID,
+                                targetFrame: CGRect) {
+        let restoreEnhancedUI = windowElement.prepareForFrameAnimation()
+        let duration = WindowFrameAnimation.sanitizedDuration(Defaults.windowAnimationDuration.value)
+
+        windowFrameAnimator.animate(
+            from: windowElement.frame,
+            to: targetFrame,
+            duration: duration,
+            applyFrame: { frame in
+                windowElement.setFrameDuringAnimation(frame)
+            },
+            completion: {
+                windowElement.finishFrameAnimation(restoreEnhancedUI: restoreEnhancedUI)
+                if !windowElement.frame.equalTo(targetFrame) {
+                    windowElement.setFrame(targetFrame)
+                }
+                AppDelegate.windowHistory.lastRectangleActions.removeValue(forKey: windowId)
+            }
+        )
+    }
+
+    private func shouldAnimate(result: ResultParameters,
+                               cooperativeCornerPlan: CooperativeCornerApplicationPlan?,
+                               isMovedAcrossDisplays: Bool) -> Bool {
+        guard !result.isFixedSize,
+              cooperativeCornerPlan == nil,
+              !isMovedAcrossDisplays,
+              canAnimate(windowElement: result.windowElement, source: result.source)
+        else { return false }
+
+        return true
+    }
+
+    private func canAnimate(windowElement: AccessibilityElement,
+                            source: ExecutionSource) -> Bool {
+        guard Defaults.windowAnimation.enabled,
+              source.allowsWindowAnimation,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              NSEvent.pressedMouseButtons == 0
+        else { return false }
+
+        if let pid = windowElement.pid,
+           let bundleIdentifier = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
+           Defaults.windowAnimationIgnoredApps.typedValue?.contains(bundleIdentifier) == true {
+            return false
+        }
+
+        return true
+    }
+
+    private func animate(result: ResultParameters,
+                         from currentFrame: CGRect,
+                         oldNormalizedFrame: CGRect,
+                         ignoreTodo: Bool,
+                         lastRectangleAction: RectangleAction?) {
+        let windowElement = result.windowElement
+        let restoreEnhancedUI = windowElement.prepareForFrameAnimation()
+        let duration = WindowFrameAnimation.sanitizedDuration(Defaults.windowAnimationDuration.value)
+
+        windowFrameAnimator.animate(
+            from: currentFrame,
+            to: result.calcResult.rect.screenFlipped,
+            duration: duration,
+            applyFrame: { frame in
+                windowElement.setFrameDuringAnimation(frame)
+            },
+            completion: { [weak self] in
+                windowElement.finishFrameAnimation(restoreEnhancedUI: restoreEnhancedUI)
+                guard let self else { return }
+
+                var resultingRect = self.apply(result: result)
+                self.applyCooperativeCornerCleanupIfNeeded(
+                    focusedWindowId: result.windowId,
+                    source: result.source,
+                    oldFocusedFrame: oldNormalizedFrame,
+                    newFocusedFrame: resultingRect.screenFlipped,
+                    screenFrame: result.usableScreens.currentScreen.adjustedVisibleFrame(ignoreTodo),
+                    currentAction: result.action,
+                    lastRectangleAction: lastRectangleAction
+                )
+                resultingRect = windowElement.frame
+                self.postProcess(result: result, resultingRect: resultingRect)
+            }
+        )
     }
     
     /// Move/resize a window based on the calculation results.
@@ -395,4 +528,13 @@ struct ExecutionParameters {
 
 enum ExecutionSource {
     case keyboardShortcut, dragToSnap, menuItem, url, titleBar
+
+    var allowsWindowAnimation: Bool {
+        switch self {
+        case .keyboardShortcut, .menuItem, .url:
+            return true
+        case .dragToSnap, .titleBar:
+            return false
+        }
+    }
 }

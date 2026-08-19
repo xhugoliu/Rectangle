@@ -6,6 +6,141 @@ protocol WindowMover {
     func moveWindow(toRect rect: CGRect, resultParameters: ResultParameters)
 }
 
+/// Time-based geometry used by the accessibility window animation. Keeping the
+/// interpolation independent from AX makes it deterministic and unit testable.
+enum WindowFrameAnimation {
+    static let defaultDuration: Float = 0.16
+    static let minimumDuration: TimeInterval = 0.08
+    static let maximumDuration: TimeInterval = 0.4
+
+    static func sanitizedDuration(_ duration: Float) -> TimeInterval {
+        min(maximumDuration, max(minimumDuration, TimeInterval(duration)))
+    }
+
+    static func easeOutCubic(_ progress: CGFloat) -> CGFloat {
+        let clamped = min(1, max(0, progress))
+        let remaining = 1 - clamped
+        return 1 - remaining * remaining * remaining
+    }
+
+    static func interpolate(from start: CGRect, to target: CGRect, progress: CGFloat) -> CGRect {
+        let eased = easeOutCubic(progress)
+        return CGRect(
+            x: start.origin.x + (target.origin.x - start.origin.x) * eased,
+            y: start.origin.y + (target.origin.y - start.origin.y) * eased,
+            width: start.width + (target.width - start.width) * eased,
+            height: start.height + (target.height - start.height) * eased
+        )
+    }
+}
+
+/// Runs at most one short window animation at a time. Rectangle actions are
+/// history-dependent, so a new action first finishes the pending animation and
+/// records its exact final frame before calculating the next action.
+final class WindowFrameAnimator {
+    private struct ActiveAnimation {
+        let generation: UInt
+        let timer: DispatchSourceTimer
+        let startFrame: CGRect
+        let targetFrame: CGRect
+        let startedAt: TimeInterval
+        let duration: TimeInterval
+        let applyFrame: (CGRect) -> Void
+        let completion: () -> Void
+    }
+
+    private static let frameInterval = DispatchTimeInterval.milliseconds(16)
+    private static let slowFrameThreshold: TimeInterval = 0.04
+
+    private var activeAnimation: ActiveAnimation?
+    private var generation: UInt = 0
+
+    var isAnimating: Bool { activeAnimation != nil }
+
+    func animate(from startFrame: CGRect,
+                 to targetFrame: CGRect,
+                 duration: TimeInterval,
+                 applyFrame: @escaping (CGRect) -> Void,
+                 completion: @escaping () -> Void) {
+        finishActiveAnimation()
+
+        guard duration > 0, !startFrame.isNull, !targetFrame.isNull else {
+            applyFrame(targetFrame)
+            completion()
+            return
+        }
+
+        generation &+= 1
+        let currentGeneration = generation
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        let animation = ActiveAnimation(
+            generation: currentGeneration,
+            timer: timer,
+            startFrame: startFrame,
+            targetFrame: targetFrame,
+            startedAt: ProcessInfo.processInfo.systemUptime,
+            duration: duration,
+            applyFrame: applyFrame,
+            completion: completion
+        )
+        activeAnimation = animation
+
+        timer.schedule(deadline: .now() + Self.frameInterval,
+                       repeating: Self.frameInterval,
+                       leeway: .milliseconds(2))
+        timer.setEventHandler { [weak self] in
+            self?.tick(generation: currentGeneration)
+        }
+        timer.resume()
+    }
+
+    func finishActiveAnimation() {
+        guard let animation = activeAnimation else { return }
+        complete(animation)
+    }
+
+    private func tick(generation: UInt) {
+        guard let animation = activeAnimation,
+              animation.generation == generation
+        else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let progress = min(1, (now - animation.startedAt) / animation.duration)
+        if progress >= 1 {
+            complete(animation)
+            return
+        }
+
+        let frame = WindowFrameAnimation.interpolate(from: animation.startFrame,
+                                                     to: animation.targetFrame,
+                                                     progress: CGFloat(progress))
+        let frameStartedAt = ProcessInfo.processInfo.systemUptime
+        animation.applyFrame(frame)
+
+        // AX writes can block for some applications. A time-based animation
+        // already skips delayed frames; if one write is especially slow, land
+        // immediately instead of extending a visibly laggy transition.
+        if ProcessInfo.processInfo.systemUptime - frameStartedAt > Self.slowFrameThreshold {
+            Logger.log("Window animation AX update was slow; completing immediately")
+            complete(animation)
+        }
+    }
+
+    private func complete(_ animation: ActiveAnimation) {
+        guard activeAnimation?.generation == animation.generation else { return }
+        activeAnimation = nil
+        animation.timer.setEventHandler {}
+        animation.timer.cancel()
+        animation.applyFrame(animation.targetFrame)
+        animation.completion()
+    }
+
+    deinit {
+        activeAnimation?.timer.setEventHandler {}
+        activeAnimation?.timer.cancel()
+    }
+}
+
 /// Repositions a window that may not fill its snap zone. Pure geometry, no side effects.
 ///
 /// Per axis: if the zone touches exactly one screen edge on that axis, anchor the window

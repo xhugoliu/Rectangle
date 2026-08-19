@@ -200,6 +200,7 @@ class ShortcutManager {
     }
 
     private func execute(_ originalParameters: ExecutionParameters) {
+        windowManager.finishActiveAnimation()
         var parameters = originalParameters
 
         if MultiWindowManager.execute(parameters: parameters) {
@@ -234,6 +235,7 @@ class ShortcutManager {
     }
 
     private func executeCycle(_ group: ShortcutCycle.Group) {
+        windowManager.finishActiveAnimation()
         guard let windowElement = AccessibilityElement.getFrontWindowElement(),
               let windowId = windowElement.getWindowId()
         else {

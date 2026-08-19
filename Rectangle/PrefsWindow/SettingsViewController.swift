@@ -49,6 +49,9 @@ class SettingsViewController: NSViewController {
     private var combinedDisplayModeCheckbox: NSButton?
     private var greenButtonOverrideCheckbox: NSButton?
     private var autoMaximizeCheckbox: NSButton?
+    private var windowAnimationCheckbox: NSButton?
+    private var windowAnimationDurationSlider: NSSlider?
+    private var windowAnimationDurationLabel: NSTextField?
     
     @IBAction func toggleLaunchOnLogin(_ sender: NSButton) {
         let newSetting: Bool = sender.state == .on
@@ -142,6 +145,7 @@ class SettingsViewController: NSViewController {
     }
     
     @IBAction func checkForUpdates(_ sender: Any) {
+        guard !AppDelegate.isPersonalBuild else { return }
         AppDelegate.instance.updaterController?.checkForUpdates(sender)
     }
     
@@ -184,6 +188,18 @@ class SettingsViewController: NSViewController {
 
     @objc func toggleAutoMaximize(_ sender: NSButton) {
         Defaults.autoMaximize.enabled = sender.state == .on
+    }
+
+    @objc func toggleWindowAnimation(_ sender: NSButton) {
+        Defaults.windowAnimation.enabled = sender.state == .on
+        updateWindowAnimationControls()
+    }
+
+    @objc func windowAnimationDurationChanged(_ sender: NSSlider) {
+        let duration = WindowFrameAnimation.sanitizedDuration(Float(sender.doubleValue))
+        Defaults.windowAnimationDuration.value = Float(duration)
+        sender.doubleValue = duration
+        windowAnimationDurationLabel?.stringValue = "\(Int((duration * 1000).rounded())) ms"
     }
 
     @IBAction func toggleTodoMode(_ sender: NSButton) {
@@ -1036,7 +1052,12 @@ class SettingsViewController: NSViewController {
     override func awakeFromNib() {
         initializeToggles()
 
-        checkForUpdatesAutomaticallyCheckbox.bind(.value, to: AppDelegate.instance.updaterController.updater, withKeyPath: "automaticallyChecksForUpdates", options: nil)
+        if AppDelegate.isPersonalBuild {
+            checkForUpdatesAutomaticallyCheckbox.isHidden = true
+            checkForUpdatesButton.isHidden = true
+        } else {
+            checkForUpdatesAutomaticallyCheckbox.bind(.value, to: AppDelegate.instance.updaterController.updater, withKeyPath: "automaticallyChecksForUpdates", options: nil)
+        }
         
         let appVersionString: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
         let buildString: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as! String
@@ -1077,6 +1098,8 @@ class SettingsViewController: NSViewController {
         initializeGreenButtonOverrideCheckbox()
 
         initializeAutoMaximizeCheckbox()
+
+        initializeWindowAnimationControls()
 
         Notification.Name.configImported.onPost(using: {_ in
             self.initializeTodoModeSettings()
@@ -1148,6 +1171,12 @@ class SettingsViewController: NSViewController {
         greenButtonOverrideCheckbox?.state = Defaults.greenButtonOverride.enabled ? .on : .off
 
         autoMaximizeCheckbox?.state = Defaults.autoMaximize.userDisabled ? .off : .on
+
+        windowAnimationCheckbox?.state = Defaults.windowAnimation.enabled ? .on : .off
+        let animationDuration = WindowFrameAnimation.sanitizedDuration(Defaults.windowAnimationDuration.value)
+        windowAnimationDurationSlider?.doubleValue = animationDuration
+        windowAnimationDurationLabel?.stringValue = "\(Int((animationDuration * 1000).rounded())) ms"
+        updateWindowAnimationControls()
 
         if StageUtil.stageCapable {
             stageSlider.intValue = Int32(Defaults.stageSize.value)
@@ -1248,6 +1277,85 @@ class SettingsViewController: NSViewController {
             parentStack.insertArrangedSubview(checkbox, at: insertIdx + 1)
             autoMaximizeCheckbox = checkbox
         }
+    }
+
+    private func initializeWindowAnimationControls() {
+        if windowAnimationCheckbox == nil,
+           let parentStack = doubleClickTitleBarCheckbox.superview as? NSStackView,
+           let insertIdx = parentStack.arrangedSubviews.firstIndex(of: doubleClickTitleBarCheckbox) {
+
+            let checkbox = NSButton(
+                checkboxWithTitle: NSLocalizedString("Animate window movement and resizing", tableName: "Main", value: "", comment: ""),
+                target: self,
+                action: #selector(toggleWindowAnimation(_:))
+            )
+            checkbox.state = Defaults.windowAnimation.enabled ? .on : .off
+            checkbox.setContentCompressionResistancePriority(.required, for: .vertical)
+            checkbox.setContentHuggingPriority(.defaultHigh, for: .vertical)
+
+            let description = NSTextField(wrappingLabelWithString: NSLocalizedString(
+                "Keyboard, menu, and URL actions use a short transition. Drag snapping, cross-display moves, and Reduce Motion use an immediate resize.",
+                tableName: "Main",
+                value: "",
+                comment: ""
+            ))
+            description.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+            description.textColor = .secondaryLabelColor
+            description.translatesAutoresizingMaskIntoConstraints = false
+            description.preferredMaxLayoutWidth = 500
+            description.setContentCompressionResistancePriority(.required, for: .vertical)
+            description.setContentHuggingPriority(.defaultHigh, for: .vertical)
+
+            let durationTitle = NSTextField(labelWithString: NSLocalizedString("Duration", tableName: "Main", value: "", comment: ""))
+            durationTitle.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            let duration = WindowFrameAnimation.sanitizedDuration(Defaults.windowAnimationDuration.value)
+            let slider = NSSlider(
+                value: duration,
+                minValue: WindowFrameAnimation.minimumDuration,
+                maxValue: WindowFrameAnimation.maximumDuration,
+                target: self,
+                action: #selector(windowAnimationDurationChanged(_:))
+            )
+            slider.isContinuous = true
+            slider.numberOfTickMarks = 9
+            slider.allowsTickMarkValuesOnly = false
+
+            let durationLabel = NSTextField(labelWithString: "\(Int((duration * 1000).rounded())) ms")
+            durationLabel.alignment = .right
+            durationLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            let durationRow = NSStackView(views: [durationTitle, slider, durationLabel])
+            durationRow.orientation = .horizontal
+            durationRow.alignment = .centerY
+            durationRow.spacing = 8
+            slider.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+            durationLabel.widthAnchor.constraint(equalToConstant: 54).isActive = true
+
+            let separator = NSBox()
+            separator.boxType = .separator
+            separator.translatesAutoresizingMaskIntoConstraints = false
+            separator.setContentHuggingPriority(.defaultHigh, for: .vertical)
+
+            parentStack.insertArrangedSubview(separator, at: insertIdx + 1)
+            parentStack.insertArrangedSubview(checkbox, at: insertIdx + 2)
+            parentStack.insertArrangedSubview(description, at: insertIdx + 3)
+            parentStack.insertArrangedSubview(durationRow, at: insertIdx + 4)
+            separator.widthAnchor.constraint(equalTo: doubleClickTitleBarCheckbox.widthAnchor).isActive = true
+            separator.heightAnchor.constraint(equalToConstant: 20).isActive = true
+
+            windowAnimationCheckbox = checkbox
+            windowAnimationDurationSlider = slider
+            windowAnimationDurationLabel = durationLabel
+        }
+
+        updateWindowAnimationControls()
+    }
+
+    private func updateWindowAnimationControls() {
+        let enabled = Defaults.windowAnimation.enabled
+        windowAnimationDurationSlider?.isEnabled = enabled
+        windowAnimationDurationLabel?.textColor = enabled ? .labelColor : .disabledControlTextColor
     }
 
     private func setVisibility(shown: Bool, ofView view: NSView, withConstraint constraint: NSLayoutConstraint, animated: Bool) {

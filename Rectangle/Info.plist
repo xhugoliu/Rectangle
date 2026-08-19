@@ -41,6 +41,8 @@
 	<string>Main</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>RectanglePersonalBuild</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://rectangleapp.com/downloads/updates.xml</string>
 	<key>SUPublicEDKey</key>
