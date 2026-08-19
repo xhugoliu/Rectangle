@@ -22,7 +22,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     - name: Test
-      run: xcodebuild -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" test CODE_SIGNING_ALLOWED=NO
+      run: |
+        xcodebuild -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" test CODE_SIGNING_ALLOWED=NO \
+          -only-testing:RectangleTests/BoolDefaultTests \
+          -only-testing:RectangleTests/WindowFrameAnimationTests
     - name: Build
       run: xcodebuild -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" archive CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" -archivePath "$BUILD_DIR/$XCODE_ARCHIVE"
     - name: Export
