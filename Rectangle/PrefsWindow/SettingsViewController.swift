@@ -145,6 +145,7 @@ class SettingsViewController: NSViewController {
     }
     
     @IBAction func checkForUpdates(_ sender: Any) {
+        guard !AppDelegate.isPersonalBuild else { return }
         AppDelegate.instance.updaterController?.checkForUpdates(sender)
     }
     
@@ -1051,7 +1052,12 @@ class SettingsViewController: NSViewController {
     override func awakeFromNib() {
         initializeToggles()
 
-        checkForUpdatesAutomaticallyCheckbox.bind(.value, to: AppDelegate.instance.updaterController.updater, withKeyPath: "automaticallyChecksForUpdates", options: nil)
+        if AppDelegate.isPersonalBuild {
+            checkForUpdatesAutomaticallyCheckbox.isHidden = true
+            checkForUpdatesButton.isHidden = true
+        } else {
+            checkForUpdatesAutomaticallyCheckbox.bind(.value, to: AppDelegate.instance.updaterController.updater, withKeyPath: "automaticallyChecksForUpdates", options: nil)
+        }
         
         let appVersionString: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
         let buildString: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as! String

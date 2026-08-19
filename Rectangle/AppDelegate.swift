@@ -9,6 +9,9 @@ import os.log
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     static let launcherAppId = "com.knollsoft.RectangleLauncher"
+    static var isPersonalBuild: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "RectanglePersonalBuild") as? Bool == true
+    }
 
     private let accessibilityAuthorization = AccessibilityAuthorization()
     private let statusItem = RectangleStatusItem.instance
@@ -53,6 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         checkVersion()
         mainStatusMenu.delegate = self
+        updatesMenuItem.isHidden = Self.isPersonalBuild
         statusItem.refreshVisibility()
         checkLaunchOnLogin()
         
@@ -145,7 +149,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func checkAutoCheckForUpdates() {
-        updaterController.updater.automaticallyChecksForUpdates = Defaults.SUEnableAutomaticChecks.enabled
+        updaterController.updater.automaticallyChecksForUpdates = !Self.isPersonalBuild && Defaults.SUEnableAutomaticChecks.enabled
     }
     
     func accessibilityTrusted() {
@@ -285,6 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @IBAction func checkForUpdates(_ sender: Any) {
+        guard !Self.isPersonalBuild else { return }
         updaterController.checkForUpdates(sender)
     }
     
