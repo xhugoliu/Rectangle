@@ -132,16 +132,7 @@ class AccessibilityElement {
     /// To handle moving to different displays, we have to adjust the size then the position, then the size again since macOS will enforce sizes that fit on the current display.
     /// When windows take a long time to adjust size & position, there is some visual stutter with doing each of these actions. The stutter can be slightly reduced by removing the initial size adjustment, which can make unsnap restore appear smoother.
     func setFrame(_ frame: CGRect, adjustSizeFirst: Bool = true) {
-        let appElement = applicationElement
-        var enhancedUI: Bool? = nil
-
-        if let appElement = appElement {
-            enhancedUI = appElement.enhancedUserInterface
-            if enhancedUI == true {
-                Logger.log("AXEnhancedUserInterface was enabled, will disable before resizing")
-                appElement.enhancedUserInterface = false
-            }
-        }
+        let restoreEnhancedUI = prepareForFrameAnimation()
 
         if adjustSizeFirst {
             size = frame.size
@@ -149,10 +140,37 @@ class AccessibilityElement {
         position = frame.origin
         size = frame.size
 
-        // If "enhanced user interface" was originally enabled for the app, turn it back on
-        if Defaults.enhancedUI.value == .disableEnable, let appElement = appElement, enhancedUI == true {
-            appElement.enhancedUserInterface = true
-        }
+        finishFrameAnimation(restoreEnhancedUI: restoreEnhancedUI)
+    }
+
+    /// Prepare once for a short sequence of AX frame updates. Repeating the
+    /// Enhanced UI toggle for every animation frame is both slower and more
+    /// likely to expose application-specific AX behavior.
+    func prepareForFrameAnimation() -> Bool {
+        guard let appElement = applicationElement,
+              appElement.enhancedUserInterface == true
+        else { return false }
+
+        Logger.log("AXEnhancedUserInterface was enabled, will disable before resizing")
+        appElement.enhancedUserInterface = false
+        return true
+    }
+
+    /// Apply an intermediate frame without readback logging. The standard
+    /// setters intentionally read AX values for diagnostics, which would double
+    /// the number of accessibility calls on every animation tick.
+    func setFrameDuringAnimation(_ frame: CGRect) {
+        wrappedElement.setValue(.position, frame.origin)
+        wrappedElement.setValue(.size, frame.size)
+    }
+
+    func finishFrameAnimation(restoreEnhancedUI: Bool) {
+        guard restoreEnhancedUI,
+              Defaults.enhancedUI.value == .disableEnable,
+              let appElement = applicationElement
+        else { return }
+
+        appElement.enhancedUserInterface = true
     }
     
     private var childElements: [AccessibilityElement]? {

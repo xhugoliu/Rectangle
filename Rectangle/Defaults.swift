@@ -91,6 +91,9 @@ class Defaults {
     static let missionControlDragging = OptionalBoolDefault(key: "missionControlDragging")
     static let enhancedUI = IntEnumDefault<EnhancedUI>(key: "enhancedUI", defaultValue: .disableEnable)
     static let footprintAnimationDurationMultiplier = FloatDefault(key: "footprintAnimationDurationMultiplier", defaultValue: 0)
+    static let windowAnimation = BoolDefault(key: "windowAnimation", defaultValue: true)
+    static let windowAnimationDuration = FloatDefault(key: "windowAnimationDuration", defaultValue: WindowFrameAnimation.defaultDuration)
+    static let windowAnimationIgnoredApps = JSONDefault<Set<String>>(key: "windowAnimationIgnoredApps")
     static let hapticFeedbackOnSnap = OptionalBoolDefault(key: "hapticFeedbackOnSnap")
     static let missionControlDraggingAllowedOffscreenDistance = FloatDefault(key: "missionControlDraggingAllowedOffscreenDistance", defaultValue: 25)
     static let missionControlDraggingDisallowedDuration = IntDefault(key: "missionControlDraggingDisallowedDuration", defaultValue: 250)
@@ -184,6 +187,9 @@ class Defaults {
         missionControlDragging,
         enhancedUI,
         footprintAnimationDurationMultiplier,
+        windowAnimation,
+        windowAnimationDuration,
+        windowAnimationIgnoredApps,
         hapticFeedbackOnSnap,
         missionControlDraggingAllowedOffscreenDistance,
         missionControlDraggingDisallowedDuration,
@@ -238,9 +244,13 @@ class BoolDefault: Default {
         }
     }
     
-    init(key: String) {
+    init(key: String, defaultValue: Bool = false) {
         self.key = key
-        enabled = UserDefaults.standard.bool(forKey: key)
+        if UserDefaults.standard.object(forKey: key) == nil {
+            enabled = defaultValue
+        } else {
+            enabled = UserDefaults.standard.bool(forKey: key)
+        }
         initialized = true
     }
     

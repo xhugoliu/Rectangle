@@ -13,6 +13,21 @@ class RectangleTests: XCTestCase {
     }
 }
 
+class BoolDefaultTests: XCTestCase {
+
+    func testDefaultValueIsUsedOnlyWhenPreferenceIsAbsent() {
+        let key = "BoolDefaultTests-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let initial = BoolDefault(key: key, defaultValue: true)
+        XCTAssertTrue(initial.enabled)
+
+        initial.enabled = false
+        let reloaded = BoolDefault(key: key, defaultValue: true)
+        XCTAssertFalse(reloaded.enabled)
+    }
+}
+
 class PositionCyclesTests: XCTestCase {
 
     func testSixthsReturnTrue() {
@@ -91,6 +106,76 @@ class CooperativeResizeSourceTests: XCTestCase {
         XCTAssertFalse(ExecutionSource.menuItem.allowsCooperativeResize)
         XCTAssertFalse(ExecutionSource.url.allowsCooperativeResize)
         XCTAssertFalse(ExecutionSource.titleBar.allowsCooperativeResize)
+    }
+}
+
+class WindowFrameAnimationTests: XCTestCase {
+
+    func testAnimationSourcesExcludePointerDrivenActions() {
+        XCTAssertTrue(ExecutionSource.keyboardShortcut.allowsWindowAnimation)
+        XCTAssertTrue(ExecutionSource.menuItem.allowsWindowAnimation)
+        XCTAssertTrue(ExecutionSource.url.allowsWindowAnimation)
+        XCTAssertFalse(ExecutionSource.dragToSnap.allowsWindowAnimation)
+        XCTAssertFalse(ExecutionSource.titleBar.allowsWindowAnimation)
+    }
+
+    func testEaseOutCubicClampsAndReachesEndpoints() {
+        XCTAssertEqual(WindowFrameAnimation.easeOutCubic(-1), 0, accuracy: 0.0001)
+        XCTAssertEqual(WindowFrameAnimation.easeOutCubic(0), 0, accuracy: 0.0001)
+        XCTAssertEqual(WindowFrameAnimation.easeOutCubic(1), 1, accuracy: 0.0001)
+        XCTAssertEqual(WindowFrameAnimation.easeOutCubic(2), 1, accuracy: 0.0001)
+        XCTAssertGreaterThan(WindowFrameAnimation.easeOutCubic(0.5), 0.5)
+    }
+
+    func testInterpolationUsesEasedProgressForEveryFrameComponent() {
+        let start = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let target = CGRect(x: 110, y: 220, width: 700, height: 600)
+
+        assertRect(WindowFrameAnimation.interpolate(from: start, to: target, progress: 0), equals: start)
+        assertRect(WindowFrameAnimation.interpolate(from: start, to: target, progress: 1), equals: target)
+
+        let midpoint = WindowFrameAnimation.interpolate(from: start, to: target, progress: 0.5)
+        XCTAssertEqual(midpoint.origin.x, 97.5, accuracy: 0.001)
+        XCTAssertEqual(midpoint.origin.y, 195, accuracy: 0.001)
+        XCTAssertEqual(midpoint.width, 650, accuracy: 0.001)
+        XCTAssertEqual(midpoint.height, 550, accuracy: 0.001)
+    }
+
+    func testDurationIsClampedToUsableRange() {
+        XCTAssertEqual(WindowFrameAnimation.sanitizedDuration(0), WindowFrameAnimation.minimumDuration)
+        XCTAssertEqual(WindowFrameAnimation.sanitizedDuration(0.16), 0.16, accuracy: 0.0001)
+        XCTAssertEqual(WindowFrameAnimation.sanitizedDuration(2), WindowFrameAnimation.maximumDuration)
+    }
+
+    func testFinishingAnimatorAppliesExactTargetAndCompletes() {
+        let animator = WindowFrameAnimator()
+        let start = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let target = CGRect(x: 500, y: 250, width: 800, height: 600)
+        var frames: [CGRect] = []
+        var completionCount = 0
+
+        animator.animate(from: start,
+                         to: target,
+                         duration: 1,
+                         applyFrame: { frames.append($0) },
+                         completion: { completionCount += 1 })
+
+        XCTAssertTrue(animator.isAnimating)
+        animator.finishActiveAnimation()
+
+        XCTAssertFalse(animator.isAnimating)
+        assertRect(frames.last ?? .null, equals: target)
+        XCTAssertEqual(completionCount, 1)
+    }
+
+    private func assertRect(_ rect: CGRect,
+                            equals expected: CGRect,
+                            file: StaticString = #filePath,
+                            line: UInt = #line) {
+        XCTAssertEqual(rect.origin.x, expected.origin.x, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(rect.origin.y, expected.origin.y, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(rect.width, expected.width, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(rect.height, expected.height, accuracy: 0.001, file: file, line: line)
     }
 }
 

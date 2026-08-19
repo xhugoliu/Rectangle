@@ -18,6 +18,7 @@ The preferences window is purposefully slim, but there's a lot that can be modif
 - [Add additional "thirds" sizing commands](#add-additional-thirds-sizing-commands)
 - [Add doubling/halving window sizing commands](#add-doublinghalving-window-sizing-commands)
 - [Add additional tiling and cascading commands](#add-additional-tiling-and-cascading-commands)
+- [Animate window moves and resizes](#animate-window-moves-and-resizes)
 - [Modify the "footprint" displayed for drag to snap area](#modify-the-footprint-displayed-for-drag-to-snap-area)
 - [Move Up/Down/Left/Right: Don't center on edge](#move-updownleftright-dont-center-on-edge)
 - [Make Smaller limits](#make-smaller-limits)
@@ -274,6 +275,29 @@ For example, the command for setting the cascadeActiveApp shortcut to `ctrl shif
 
 ```bash
 defaults write com.knollsoft.Rectangle cascadeActiveApp -dict-add keyCode -float 2 modifierFlags -float 393475
+```
+
+## Animate window moves and resizes
+
+This fork animates keyboard, menu, and URL window actions on the current display. Drag-to-snap, title-bar actions, fixed-size windows, cooperative resizing, and moves across displays remain instantaneous. The animation also respects the macOS Reduce Motion setting.
+
+Disable or re-enable the animation with:
+
+```bash
+defaults write com.knollsoft.Rectangle windowAnimation -bool false
+defaults write com.knollsoft.Rectangle windowAnimation -bool true
+```
+
+Set the duration in seconds. Values are clamped between `0.08` and `0.4`; the default is `0.16`.
+
+```bash
+defaults write com.knollsoft.Rectangle windowAnimationDuration -float 0.16
+```
+
+Ignore applications that perform poorly during repeated Accessibility API updates by supplying their bundle identifiers as a JSON array:
+
+```bash
+defaults write com.knollsoft.Rectangle windowAnimationIgnoredApps -string '["com.example.SlowApp"]'
 ```
 
 ## Modify the "footprint" displayed for drag to snap area
